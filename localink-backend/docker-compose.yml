@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: localink-db
+    environment:
+      POSTGRES_DB: localink
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+    ports:
+      - "5432:5432"
+    volumes:
+      - localink_db_data:/var/lib/postgresql/data
+
+  backend:
+    build: .
+    container_name: localink-backend
+    depends_on:
+      - db
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/localink
+      SPRING_DATASOURCE_USERNAME: localink
+      SPRING_DATASOURCE_PASSWORD: localink
+    ports:
+      - "8088:8088"
+
+volumes:
+  localink_db_data:
