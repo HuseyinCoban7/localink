@@ -2,13 +2,16 @@ package com.huseyincoban.localink_backend.controller;
 
 import com.huseyincoban.localink_backend.dto.user.UpdateProfileRequest;
 import com.huseyincoban.localink_backend.dto.user.UserDto;
+import com.huseyincoban.localink_backend.entity.User;
 import com.huseyincoban.localink_backend.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.security.core.Authentication;
+import org.springframework.http.MediaType;
 import java.util.List;
 
 @RestController
@@ -34,5 +37,14 @@ public class UserController {
     @GetMapping("/search")
     public ResponseEntity<List<UserDto>> search(@RequestParam String query) {
         return ResponseEntity.ok(userService.searchUsers(query));
+    }
+
+    @PostMapping(value = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<UserDto> uploadAvatar(
+            Authentication authentication,
+            @RequestParam("file") MultipartFile file
+    ) {
+        User currentUser = (User) authentication.getPrincipal();
+        return ResponseEntity.ok(userService.uploadAvatar(currentUser, file));
     }
 }

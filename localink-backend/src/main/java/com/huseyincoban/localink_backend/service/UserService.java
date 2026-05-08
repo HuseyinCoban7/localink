@@ -7,6 +7,11 @@ import com.huseyincoban.localink_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.*;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,6 +48,46 @@ public class UserService {
                 .stream()
                 .map(this::toDto)
                 .toList();
+    }
+
+    @Value("${app.upload.dir:uploads}")
+    private String uploadDir;
+
+    public UserDto uploadAvatar(User currentUser, MultipartFile file) {
+        try {
+            if (file == null || file.isEmpty()) {
+                throw new IllegalArgumentException("Dosya boş olamaz.");
+            }
+
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                throw new IllegalArgumentException("Sadece görsel dosyası yüklenebilir.");
+            }
+
+            Path avatarDir = Paths.get(uploadDir, "avatars");
+            Files.createDirectories(avatarDir);
+
+            String originalFilename = file.getOriginalFilename();
+            String extension = ".jpg";
+
+            if (originalFilename != null && originalFilename.contains(".")) {
+                extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+            }
+
+            String filename = "avatar-user-" + currentUser.getId() + "-" + System.currentTimeMillis() + extension;
+            Path targetPath = avatarDir.resolve(filename);
+
+            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+
+            String avatarUrl = "/uploads/avatars/" + filename;
+
+            currentUser.setAvatarUrl(avatarUrl);
+            User saved = userRepository.save(currentUser);
+
+            return toDto(saved);
+        } catch (IOException e) {
+            throw new RuntimeException("Avatar yüklenirken hata oluştu.");
+        }
     }
 
     private UserDto toDto(User user) {
