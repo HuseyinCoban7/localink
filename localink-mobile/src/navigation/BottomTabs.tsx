@@ -1,15 +1,14 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { Ionicons } from "@expo/vector-icons";
 
 import HomeScreen from "../screens/Home/HomeScreen";
 import MapScreen from "../screens/Map/MapScreen";
 
-// Friends stack screens
 import FriendsScreen from "../screens/Friends/FriendsScreen";
 import FriendRequestsScreen from "../screens/Friends/FriendRequestsScreen";
 
-// Profile stack screens
 import ProfileScreen from "../screens/Profile/ProfileScreen";
 import EditProfileScreen from "../screens/Profile/EditProfileScreen";
 
@@ -66,11 +65,43 @@ const FriendsStackNavigator = () => (
 
 const BottomTabs = () => {
     return (
-        <Tab.Navigator screenOptions={{ headerShown: false }}>
-            <Tab.Screen name="Home" component={HomeScreen} />
-            <Tab.Screen name="Map" component={MapScreen} />
-            <Tab.Screen name="Friends" component={FriendsStackNavigator} />
-            <Tab.Screen name="Profile" component={ProfileStackNavigator} />
+        <Tab.Navigator
+            screenOptions={({ route }) => ({
+                headerShown: false,
+                tabBarActiveTintColor: "#2563eb",
+                tabBarInactiveTintColor: "#94a3b8",
+                tabBarStyle: {
+                    height: 62,
+                    paddingBottom: 8,
+                    paddingTop: 6,
+                    backgroundColor: "#ffffff",
+                    borderTopColor: "#e2e8f0",
+                },
+                tabBarLabelStyle: {
+                    fontSize: 11,
+                    fontWeight: "600",
+                },
+                tabBarIcon: ({ color, size, focused }) => {
+                    let iconName: keyof typeof Ionicons.glyphMap = "home-outline";
+
+                    if (route.name === "Home") {
+                        iconName = focused ? "home" : "home-outline";
+                    } else if (route.name === "Map") {
+                        iconName = focused ? "map" : "map-outline";
+                    } else if (route.name === "Friends") {
+                        iconName = focused ? "people" : "people-outline";
+                    } else if (route.name === "Profile") {
+                        iconName = focused ? "person" : "person-outline";
+                    }
+
+                    return <Ionicons name={iconName} size={size} color={color} />;
+                },
+            })}
+        >
+            <Tab.Screen name="Home" component={HomeScreen} options={{ title: "Ana Sayfa" }} />
+            <Tab.Screen name="Map" component={MapScreen} options={{ title: "Harita" }} />
+            <Tab.Screen name="Friends" component={FriendsStackNavigator} options={{ title: "Arkadaşlar" }} />
+            <Tab.Screen name="Profile" component={ProfileStackNavigator} options={{ title: "Profil" }} />
         </Tab.Navigator>
     );
 };

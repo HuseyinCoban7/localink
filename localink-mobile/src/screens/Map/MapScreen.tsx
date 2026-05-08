@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     View,
     Text,
@@ -19,7 +19,6 @@ import {
 } from "../../api/locationsApi";
 import { getNearbyPoi, PoiCategory, PoiDto } from "../../api/poiApi";
 
-// ✅ react-native-maps web'de patlamasın diye conditional require
 let MapView: any = null;
 let Marker: any = null;
 let Callout: any = null;
@@ -33,10 +32,20 @@ if (Platform.OS !== "web") {
 
 type CategoryFilter = "ALL" | PoiCategory;
 
+const categoryLabels: Record<CategoryFilter, string> = {
+    ALL: "Tümü",
+    PHARMACY: "Eczane",
+    BAKERY: "Fırın",
+    CAFE: "Kafe",
+    OTHER: "Diğer",
+};
+
 const MapScreen: React.FC = () => {
     const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
     const [loading, setLoading] = useState(true);
     const [sharing, setSharing] = useState(false);
+
+    const shareIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const [currentLocation, setCurrentLocation] = useState<{
         latitude: number;
@@ -70,7 +79,7 @@ const MapScreen: React.FC = () => {
                 return;
             }
 
-            let loc: ExpoLocation.LocationObject | ExpoLocation.LocationObject | null = null;
+            let loc: ExpoLocation.LocationObject | null = null;
 
             try {
                 loc = await ExpoLocation.getCurrentPositionAsync({
@@ -94,7 +103,7 @@ const MapScreen: React.FC = () => {
                 longitude: loc.coords.longitude,
                 accuracy: loc.coords.accuracy,
             });
-        } catch (e) {
+        } catch {
             Alert.alert("Hata", "Konum alınırken bir hata oluştu.");
         } finally {
             setLoading(false);
@@ -125,6 +134,77 @@ const MapScreen: React.FC = () => {
         }
     };
 
+    const shareCurrentLocationOnce = async () => {
+        let loc = currentLocation;
+
+        try {
+            const fresh = await ExpoLocation.getCurrentPositionAsync({
+                accuracy: ExpoLocation.Accuracy.High,
+            });
+
+            loc = {
+                latitude: fresh.coords.latitude,
+                longitude: fresh.coords.longitude,
+                accuracy: fresh.coords.accuracy,
+            };
+
+            setCurrentLocation(loc);
+        } catch {
+            // Mevcut currentLocation varsa onunla paylaşmaya devam eder.
+        }
+
+        if (!loc) return;
+
+        await shareLocation({
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            accuracyMeters: loc.accuracy ?? undefined,
+            visibility: "FRIENDS",
+            ttlMinutes: 60,
+        });
+    };
+
+    const startAutoSharing = async () => {
+        try {
+            await shareCurrentLocationOnce();
+
+            setSharing(true);
+
+            if (shareIntervalRef.current) {
+                clearInterval(shareIntervalRef.current);
+            }
+
+            shareIntervalRef.current = setInterval(async () => {
+                try {
+                    await shareCurrentLocationOnce();
+                    await loadMapData();
+                } catch (e) {
+                    console.log("Auto location share failed:", e);
+                }
+            }, 30000);
+
+            Alert.alert("Başarılı", "Konumun otomatik olarak paylaşılmaya başladı.");
+        } catch (e: any) {
+            Alert.alert("Hata", e?.response?.data?.message ?? "Konum paylaşılamadı.");
+        }
+    };
+
+    const stopAutoSharing = async () => {
+        try {
+            if (shareIntervalRef.current) {
+                clearInterval(shareIntervalRef.current);
+                shareIntervalRef.current = null;
+            }
+
+            await deleteMyLocation();
+            setSharing(false);
+
+            Alert.alert("Tamam", "Konum paylaşımı kapatıldı.");
+        } catch (e: any) {
+            Alert.alert("Hata", e?.response?.data?.message ?? "Konum silinemedi.");
+        }
+    };
+
     useEffect(() => {
         loadCurrentLocation();
     }, []);
@@ -135,34 +215,13 @@ const MapScreen: React.FC = () => {
         }
     }, [currentLocation, category]);
 
-    const onShareLocation = async () => {
-        if (!currentLocation) return;
-
-        try {
-            await shareLocation({
-                latitude: currentLocation.latitude,
-                longitude: currentLocation.longitude,
-                accuracyMeters: currentLocation.accuracy ?? undefined,
-                visibility: "FRIENDS",
-                ttlMinutes: 60,
-            });
-
-            setSharing(true);
-            Alert.alert("Başarılı", "Konumun arkadaşlarınla paylaşıldı.");
-        } catch (e: any) {
-            Alert.alert("Hata", e?.response?.data?.message ?? "Konum paylaşılamadı.");
-        }
-    };
-
-    const onStopSharing = async () => {
-        try {
-            await deleteMyLocation();
-            setSharing(false);
-            Alert.alert("Tamam", "Konum paylaşımı kapatıldı.");
-        } catch (e: any) {
-            Alert.alert("Hata", e?.response?.data?.message ?? "Konum silinemedi.");
-        }
-    };
+    useEffect(() => {
+        return () => {
+            if (shareIntervalRef.current) {
+                clearInterval(shareIntervalRef.current);
+            }
+        };
+    }, []);
 
     const lastSeenText = (updatedAt: string) => {
         const diffMs = Date.now() - new Date(updatedAt).getTime();
@@ -212,6 +271,8 @@ const MapScreen: React.FC = () => {
         );
     }
 
+    const filterItems: CategoryFilter[] = ["ALL", "PHARMACY", "BAKERY", "CAFE"];
+
     return (
         <View style={styles.container}>
             {Platform.OS === "web" ? (
@@ -219,41 +280,34 @@ const MapScreen: React.FC = () => {
                     <Card>
                         <Text style={styles.sectionTitle}>Web Önizleme</Text>
                         <Text style={styles.infoText}>
-                            Harita bileşeni web’de sınırlı olabilir. Mobil cihaz veya emulator’da
-                            daha sağlıklı test edebilirsin.
+                            Harita bileşeni web’de sınırlı olabilir. Mobil cihaz veya emulator’da daha sağlıklı test edebilirsin.
                         </Text>
                         <Text style={styles.infoText}>
-                            Mevcut konum: {currentLocation.latitude.toFixed(5)},{" "}
-                            {currentLocation.longitude.toFixed(5)}
+                            Mevcut konum: {currentLocation.latitude.toFixed(5)}, {currentLocation.longitude.toFixed(5)}
                         </Text>
                     </Card>
 
                     <Card>
                         <Text style={styles.sectionTitle}>Konum Paylaşımı</Text>
                         <Button
-                            title={sharing ? "Konum Paylaşımını Durdur" : "Konumumu Paylaş"}
-                            onPress={sharing ? onStopSharing : onShareLocation}
+                            title={sharing ? "Paylaşımı Durdur" : "Konumumu Paylaş"}
+                            onPress={sharing ? stopAutoSharing : startAutoSharing}
                         />
                         <Button title="Verileri Yenile" onPress={loadMapData} />
                     </Card>
 
                     <Card>
                         <Text style={styles.sectionTitle}>POI Filtreleri</Text>
-                        <View style={styles.filterRow}>
-                            <Button title="ALL" onPress={() => setCategory("ALL")} disabled={category === "ALL"} />
-                            <Button
-                                title="PHARMACY"
-                                onPress={() => setCategory("PHARMACY")}
-                                disabled={category === "PHARMACY"}
-                            />
-                        </View>
-                        <View style={styles.filterRow}>
-                            <Button
-                                title="BAKERY"
-                                onPress={() => setCategory("BAKERY")}
-                                disabled={category === "BAKERY"}
-                            />
-                            <Button title="CAFE" onPress={() => setCategory("CAFE")} disabled={category === "CAFE"} />
+                        <View style={styles.chipRow}>
+                            {filterItems.map((item) => (
+                                <Text
+                                    key={item}
+                                    onPress={() => setCategory(item)}
+                                    style={[styles.chip, category === item && styles.chipActive]}
+                                >
+                                    {categoryLabels[item]}
+                                </Text>
+                            ))}
                         </View>
                     </Card>
 
@@ -268,9 +322,7 @@ const MapScreen: React.FC = () => {
                                     <Text style={styles.infoText}>
                                         {f.latitude.toFixed(5)}, {f.longitude.toFixed(5)}
                                     </Text>
-                                    <Text style={styles.infoText}>
-                                        Son görülme: {lastSeenText(f.updatedAt)}
-                                    </Text>
+                                    <Text style={styles.infoText}>Son görülme: {lastSeenText(f.updatedAt)}</Text>
                                 </View>
                             ))
                         )}
@@ -346,35 +398,42 @@ const MapScreen: React.FC = () => {
                     </MapView>
 
                     <View style={styles.overlay}>
-                        <Card>
-                            <Text style={styles.sectionTitle}>Konum Paylaşımı</Text>
-                            <Button
-                                title={sharing ? "Konum Paylaşımını Durdur" : "Konumumu Paylaş"}
-                                onPress={sharing ? onStopSharing : onShareLocation}
-                            />
-                            <Button title="Verileri Yenile" onPress={loadMapData} />
-                            <Button title="Konumu Yeniden Al" onPress={loadCurrentLocation} />
-                        </Card>
+                        <View style={styles.mapPanel}>
+                            <View style={styles.panelHeader}>
+                                <View>
+                                    <Text style={styles.panelTitle}>Konum Paylaşımı</Text>
+                                    <Text style={styles.panelSubtitle}>
+                                        {sharing ? "Konumun arkadaşlarınla paylaşılıyor" : "Konum paylaşımı kapalı"}
+                                    </Text>
+                                </View>
 
-                        <Card>
-                            <Text style={styles.sectionTitle}>POI Filtreleri</Text>
-                            <View style={styles.filterRow}>
-                                <Button title="ALL" onPress={() => setCategory("ALL")} disabled={category === "ALL"} />
-                                <Button
-                                    title="PHARMACY"
-                                    onPress={() => setCategory("PHARMACY")}
-                                    disabled={category === "PHARMACY"}
-                                />
+                                <View style={[styles.statusDot, sharing ? styles.statusOn : styles.statusOff]} />
                             </View>
-                            <View style={styles.filterRow}>
-                                <Button
-                                    title="BAKERY"
-                                    onPress={() => setCategory("BAKERY")}
-                                    disabled={category === "BAKERY"}
-                                />
-                                <Button title="CAFE" onPress={() => setCategory("CAFE")} disabled={category === "CAFE"} />
+
+                            <Button
+                                title={sharing ? "Paylaşımı Durdur" : "Konumumu Paylaş"}
+                                onPress={sharing ? stopAutoSharing : startAutoSharing}
+                            />
+
+                            <View style={styles.compactActions}>
+                                <Button title="Yenile" onPress={loadMapData} />
+                                <Button title="Konum Al" onPress={loadCurrentLocation} />
                             </View>
-                        </Card>
+
+                            <Text style={styles.filterTitle}>Yakındaki Yerler</Text>
+
+                            <View style={styles.chipRow}>
+                                {filterItems.map((item) => (
+                                    <Text
+                                        key={item}
+                                        onPress={() => setCategory(item)}
+                                        style={[styles.chip, category === item && styles.chipActive]}
+                                    >
+                                        {categoryLabels[item]}
+                                    </Text>
+                                ))}
+                            </View>
+                        </View>
                     </View>
                 </>
             )}
@@ -402,19 +461,81 @@ const styles = StyleSheet.create({
     },
     overlay: {
         position: "absolute",
-        left: 12,
-        right: 12,
-        bottom: 12,
+        left: 14,
+        right: 14,
+        bottom: 18,
+    },
+    mapPanel: {
+        backgroundColor: "#ffffff",
+        borderRadius: 22,
+        padding: 16,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.15,
+        shadowRadius: 16,
+        elevation: 8,
+    },
+    panelHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 10,
+    },
+    panelTitle: {
+        fontSize: 16,
+        fontWeight: "800",
+        color: "#1e293b",
+    },
+    panelSubtitle: {
+        fontSize: 12,
+        color: "#64748b",
+        marginTop: 3,
+    },
+    statusDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+    },
+    statusOn: {
+        backgroundColor: "#22c55e",
+    },
+    statusOff: {
+        backgroundColor: "#ef4444",
+    },
+    compactActions: {
+        flexDirection: "row",
+        gap: 10,
+    },
+    filterTitle: {
+        marginTop: 14,
+        marginBottom: 8,
+        fontSize: 13,
+        fontWeight: "700",
+        color: "#334155",
+    },
+    chipRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+    },
+    chip: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: "#e2e8f0",
+        color: "#475569",
+        fontSize: 12,
+        fontWeight: "700",
+        overflow: "hidden",
+    },
+    chipActive: {
+        backgroundColor: "#2563eb",
+        color: "#ffffff",
     },
     sectionTitle: {
         fontWeight: "800",
         color: "#233554",
         marginBottom: 8,
-    },
-    filterRow: {
-        flexDirection: "row",
-        gap: 8,
-        marginTop: 6,
     },
     webContainer: {
         padding: 16,
